@@ -19,6 +19,7 @@
 import('monograph.MonographComponent');
 
 class MonographComponentDAO extends DAO {
+
 	/**
 	 * Retrieve an author by ID.
 	 * @param $authorId int
@@ -32,15 +33,7 @@ class MonographComponentDAO extends DAO {
 			$monographId
 		);
 
-		$returner = null;
-
-		while (!$result->EOF) {
-			$returner[] =& $this->_fromRow($result->GetRowAssoc(false));;
-			$result->moveNext();
-		}
-
-		$result->Close();
-		unset($result);
+		$returner = new DAOResultFactory($result, $this, '_fromRow', array('id'));
 
 		return $returner;
 	}
@@ -90,7 +83,7 @@ class MonographComponentDAO extends DAO {
 
  	/**
 	 * Construct a new data object corresponding to this DAO.
-	 * @return SignoffEntry
+	 * @return MonographComponent
 	 */
 	function newDataObject() {
 		return new MonographComponent();
@@ -118,6 +111,40 @@ class MonographComponentDAO extends DAO {
 		return $component;
 	}
 
+	/**
+	 * Insert a new Monograph Component.
+	 * @param $component MonographComponent
+	 */
+	function insertObject($component) {
+		$this->update(
+			'INSERT INTO monograph_components
+				(monograph_id, contact_author, seq)
+				VALUES
+				(?, ?, ?)',
+			array(
+				$component->getMonographId(),
+				$component->getPrimaryContact(),
+				$component->getSequence()
+			));
+		
+		$component->setId($this->getInsertMonographComponentId());
+		$componentContributors = $component->getAuthors();
+
+		for ($i=0,$count=count($componentContributors);$i<$count;$i++) {
+			$this->_insertMonographComponentAuthor(
+				$component->getId(), 
+				$componentContributors[$i]->getId(),
+				$component->getMonographId(), 
+				$i+1
+			);		
+		}
+		$this->updateLocaleFields($component);
+	}
+
+	/**
+	 * Update an existing Monograph Component.
+	 * @param $component MonographComponent
+	 */
 	function updateObject($component) {
 		$returner = $this->update(
 			'UPDATE monograph_components
@@ -153,7 +180,15 @@ class MonographComponentDAO extends DAO {
 		}
 		return $returner;
 	}
-	function _insertMonographComponentAuthor($componentId, $authorId, $monographId, $seq) {
+
+	/**
+	 * Associate contributors with this component.
+	 * @param $componentId int
+	 * @param $contributorId int
+	 * @param $monographId int
+	 * @param $seq int
+	 */
+	function _insertMonographComponentAuthor($componentId, $contributorId, $monographId, $seq) {
 
 		$this->update(
 			'INSERT INTO monograph_component_authors
@@ -162,13 +197,25 @@ class MonographComponentDAO extends DAO {
 				(?, ?, ?, ?)',
 				array(
 					$componentId,
-					$authorId,
+					$contributorId,
 					$monographId,
 					$seq
 				)
 			);
 	}
 
+	/**
+	 * Delete an Monograph Component.
+	 * @param $monographComponent MonographComponent
+	 */
+	function deleteObject($monographComponent) {
+		return $this->deleteById($monographComponent->getId());
+	}
+
+	/**
+	 * Delete a monograph component by Id.
+	 * @param $componentId int
+	 */
 	function deleteById($componentId) {
 		$returner = $this->update(
 			'DELETE FROM monograph_components WHERE component_id = ?', $componentId
@@ -179,6 +226,10 @@ class MonographComponentDAO extends DAO {
 		return $returner;
 	}
 
+	/**
+	 * Delete all components associated with this monograph.
+	 * @param $monographId int
+	 */
 	function deleteByMonographId($monographId) {
 		$components =& $this->getMonographComponents($monographId);
 
@@ -187,32 +238,29 @@ class MonographComponentDAO extends DAO {
 		}
  	}
 
-	function insertObject($component) {
-
-		$this->update(
-			'INSERT INTO monograph_components
-				(monograph_id, contact_author, seq)
-				VALUES
-				(?, ?, ?)',
-			array(
-				$component->getMonographId(),
-				$component->getPrimaryContact(),
-				$component->getSequence()
-			));
-		
-		$component->setId($this->getInsertMonographComponentId());
-		$componentAuthors = $component->getAuthors();
-
-		for ($i=0,$count=count($componentAuthors);$i<$count;$i++) {
-			$this->_insertMonographComponentAuthor(
-				$this->getInsertMonographComponentId(), 
-				$componentAuthors[$i]->getId(),
-				$component->getMonographId(), 
-				$i+1
-			);		
+	/**
+	 * Retrieve all contributor Ids for a component.
+	 * @param $componentId int
+	 * @return array Authors ordered by sequence
+	 */
+	function &getContributorIds($componentId) {
+		$contributorIds = array();
+		$result =& $this->retrieve(
+			'SELECT mca.author_id as contributor_id FROM monograph_component_authors mca 
+			WHERE mca.component_id = ? ORDER BY mca.seq',
+			$componentId
+		);
+		while (!$result->EOF) {
+			$contributorIds[] = $result->fields['contributor_id'];
+			$result->moveNext();
 		}
-		$this->updateLocaleFields($component);
+
+		$result->Close();
+		unset($result);
+
+		return $contributorIds;
 	}
+
 	/**
 	 * Retrieve all authors for a component.
 	 * @param $componentId int
